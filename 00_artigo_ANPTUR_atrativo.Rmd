@@ -1,0 +1,1158 @@
+---
+title: "Mineração de texto em *reviews* do TripAdvisor: uma análise de seis atrativos do Recife"
+bibliography: bibliografia.bib
+csl: apa.csl
+always_allow_html: yes
+output:
+#  officedown::rdocx_document:
+  word_document:
+    reference_docx: "template_teste.docx"
+  html_document: default
+editor_options: 
+  markdown: 
+    wrap: 72
+---
+
+```{r setup, include=FALSE}
+
+knitr::opts_chunk$set(include = FALSE)
+```
+
+```{r bibliotecas}
+
+library(tidyverse)
+library(rio)
+library(janitor)
+library(tidytext)
+library(lexiconPT)
+library(topicmodels)
+library(patchwork)
+library(knitr)
+library(sf)
+library(officedown)
+library(officer)
+```
+
+```{r tripadvisor_raw}
+
+tripadvisor_raw <- import("analise_sentimento_atrativos_rec.xlsx", setclass = "tibble") %>% 
+  clean_names() %>% 
+  arrange(web_scraper_order)
+
+```
+
+```{r tripadvisor_review}
+
+tripadvisor_review <- 
+tripadvisor_raw %>%
+  mutate(review_id = row_number()) %>%
+  drop_na(review) %>% 
+  distinct(review, atrativo, .keep_all = T) %>% 
+  select(atrativo, review, review_id, origem)
+
+```
+
+
+# Resumo
+
+Diante da grande massa de dados disponíveis tem-se observado um movimento de coleta e análise de dados como forma de gerar insights para os destinos turísticos. Neste sentido, sites que reúnem comentários (*reviews*) de usuários que visitaram destinos e atrativos podem funcionar como uma fonte interessante de dados para melhor se conhecer qual a impressão destes usuários. Adotando esta perspectiva, o presente trabalho coletou 34.233 *reviews* no site TripAdvisor. Estes *reviews* correspondem a todos os *reviews* referentes aos 6 atrativos mais avaliados (Instituto Ricardo Brennand; Praia de Boa Viagem; Recife Antigo; Praça do Marco Zero; Oficina Cerâmica Francisco Brennand; Museu Cais do Sertão) disponíveis até o dia 08/04/2022 (data da coleta dos dados). Essa coleta foi feita por meio de *webscraping* e os dados tratados no software estatístico *R*. Com os dados tratados, realizou-se análise de sentimentos e modelagem de tópicos. A análise de sentimentos identificou que a quantidade de termos associados a sentimentos positivos é significativamente maior (79,9%) que termos associados a sentimentos negativos ou neutros. Constatou-se ainda que os *reviews* positivos frequentemente utilizam termos que remetem a questões estéticas e empregam adjetivos que dão a entender que a experiência do visitante foi agradável. Já a modelagem de tópicos identificou a ocorrência de 3 tópicos: um primeiro que aponta para uma recomendação de que “vale a pena” conhecer o atrativo; um segundo que se centra nas características gerais do atrativo e; um terceiro tópico que elenca os elementos mais emblemáticos dos atrativos, ou seja, aqueles que mais parecem ter chamado a atenção dos visitantes
+
+*Palavras-chave:* mineração de texto; TripAdvisor; reviews; turismo; Recife.
+
+# Introdução
+
+De acordo com o Data Never Sleeps 9.0 (referente ao ano de 2020) da Domo
+(empresa especializada em computação na nuvem), na internet, a cada
+minuto, ocorrem 5.7 milhões de busca no Google, 575 mil mensagens são
+postadas no Twitter, 65 mil fotos são postadas no Instagram, 240 mil
+fotos são publicadas no Facebook e 6 milhões de pessoas realizam algum
+tipo de compra on-line. São números que superam os do ano de 2019. Essa
+quantidade sem precedente de dados é o que se convencionou chamar de Big
+Data. De acordo com @favero2017manual, o termo Big Data reflete a
+ocorrência simultânea de cinco características: o volume exacerbado de
+dados (resultado do aumento da capacidade computacional do incremento e
+do surgimento das mídias sociais); a velocidade (diz respeito à rapidez
+com a qual os dados passam a ser disponibilizados); a variedade (ou
+seja, a multiplicidade dos diferentes formatos em que são acessados os
+dados, tais como textos, vídeos, discursos, etc); a variabilidade
+(relacionado com fenômenos cíclicos ou sazonais, por vezes em alta
+frequência) e a complexidade (significando que muitas fontes podem ser
+acessadas com códigos, periodicidades ou critérios distintos).
+
+Diante da grande massa de dados disponíveis e, ao mesmo tempo, face ao
+aumento da capacidade de processamento dos computadores, observou-se um
+movimento de coleta e análise de dados como forma de gerar insights
+passíveis de melhorar as vantagens competitivas das empresas [@provost2013data]. Com o turismo não é diferente. De acordo com @chen2021big, o turismo é uma das principais indústrias que contribuem para a
+geração de enormes quantidades de dados não estruturados e fragmentados,
+devido, sobretudo, à consolidação da prática de utilização da internet
+para reservar produtos de viagem, revisar experiências de viagem,
+compartilhar e comunicar entre si. @chen2021big identificam três
+tipos principais aplicações de big data no turismo: i) análise de dados
+de comércio eletrônico (através de transações comerciais como reservar
+um hotel ou comprar um ingresso de atração através de sites ou
+plataformas online de turismo), ii) análise do comportamento
+espaço-temporal (inclui o estudo do movimento no tempo e no espaço dos
+turistas, utilizando tecnologias de rastreamento digital, como
+dispositivos GPS e iii) o objeto de estudo deste trabalho, a análise de
+Conteúdo Gerado pelo Usuário (ou seja, do compartilhamento das
+experiências dos turistas em sites profissionais de viagens, fóruns de
+viagens e blogs, durante e após suas viagens).
+
+De acordo com @naab2017studies, desde o início do século XXI, serviços
+web inteligentes baseados em novas tecnologias permitiram que os
+usuários de mídia contribuíssem para a produção de conteúdo de mídia e
+interação entre os usuários. Em uma extensão muito maior do que nunca, o
+operador da plataforma, em vez de produzir conteúdo de mídia, fornece
+aos usuários os meios para produzir e colaborar no conteúdo, bem como os
+meios para distribuí-lo, personalizá-lo, classificá-lo e desenvolvê-lo.
+Esse fenômeno tem recebido denominações como mídia social, Web 2.0, web
+participativa ou conteúdo gerado pelo usuário [@bruns2011produsage; @o2007web].
+
+Conteúdo Gerado pelo Usuário ou UGC (do inglês *User-Generated Content*) é
+qualquer tipo de texto, dado ou ação realizada por usuários de sistemas
+digitais on-line, publicados e divulgados pelo mesmo usuário por meio de
+canais independentes, que produza efeito expressivo ou comunicativo de
+forma individual ou combinada com outras contribuições do mesmo ou de
+outras fontes [@dos2021so]. Conforme enfatizam @naab2017studies, o
+UGC caracteriza-se por um grau de contribuição pessoal. Essas
+contribuições podem consistir em comentários dentro da estrutura de
+serviços existentes (por exemplo, cartas on-line ao editor, comentários
+de usuários ou comentários em blogs), pesquisa e preparação de
+informações (por exemplo, Wikinews) e upload de texto, imagens e áudio
+individuais (por exemplo, postagens em blogs, postagens em fóruns e
+plataformas de fotos e vídeos).
+
+Entre os exemplos acima citados, convém chamar a atenção para as
+avaliações dos usuários em plataformas online, também conhecidas como
+reviews. Para @wang2020review e @purnawirawan2012balance, reviews
+podem ser definidos como um tipo de boca-a-boca eletrônico (*electronic
+word-of-mouth* ou eWOM) escrito e divulgado pelos consumidores na
+Internet, que permite a possíveis interessados obterem facilmente as
+opiniões e experiências pessoais de produtos diferentes de indivíduos
+desconhecidos. Com a popularização das compras pela Internet, este
+tornou-se um hábito corriqueiro entre os consumidores a tal ponto,
+segundo @askalidis2016value, que se tornou parte da própria
+jornada de compra do consumidor. Avaliações on-line não são mais apenas
+uma opção, mas uma real expectativa daqueles que compram on-line. Isto
+porque reviews são fundamentais para dirimir as dúvidas e reduzir os
+riscos percebidos pelos consumidores.
+
+Depois do preço, as avaliações são o fator com maior impacto nas compras [@askalidis2016value]. Com efeito, a literatura tem demonstrado a
+importância das críticas positivas para restaurantes [@anderson2012learning; @luca2016reviews], livros [@chevalier2006effect], filmes
+[@dellarocas2005using] e bens de consumo [@maslowska2017too].
+
+Por conta de sua importância, reviews são coletados, agregados e
+exibidas aos consumidores em formatos cada vez mais "fáceis de digerir"
+por diversos setores. @askalidis2016value mencionam que os 10
+maiores varejistas dos EUA (assim como a maioria dos maiores varejistas
+do mundo) coletam e exibem comentários de usuários sobre seus produtos.
+Empresas como Yelp, Facebook, Google, IMDb e Rotten Tomatoes fornecem
+plataformas para os usuários enviarem avaliações que são, por sua vez,
+agregadas e exibidas para outros usuários. As avaliações dos usuários
+também estão sendo usadas para criar confiança entre os clientes em
+mercados descentralizados como eBay, Airbnb e Uber. No setor do turismo
+e da hospitalidade não tem sido diferente.
+
+De acordo com @schuckert2015hospitality, em 71% das viagens independentes
+as reservas são feitas online, enquanto 36% de todos os pacotes
+turísticos são reservados online. E como destacam @kaplan2010users, após o consumo, os clientes tem sido ágeis em fazer suas
+avaliações on-line sobre as experiências. O consumo dessas avaliações é
+igualmente rápido. Da perspectiva de consumidor em potencial (que está
+em fase de buscar informações), essas avaliações são bastante apreciadas
+porque são consideradas autênticas, confiáveis e úteis [@li2008self].
+
+Quando produto, serviço ou experiência em questão está relacionado ao
+turismo e a hospitalidade, um dos principais sites utilizados para a
+publicação e consulta de reviews é o TripAdvisor. Segundo o próprio
+[site da empresa](https://tripadvisor.mediaroom.com/br-about-us), o
+TripAdvisor é a maior plataforma de viagens do mundo. Disponível em 49
+mercados e 28 idiomas, o TripAdvisor disponibiliza mais de 859 milhões
+de avaliações e opiniões sobre 8,6 milhões de acomodações, restaurantes,
+experiências, companhias aéreas e cruzeiros.
+
+Ao mesmo tempo que estes milhões de reviews constituem informação
+relevante para outros usuários, eles também podem servir como elemento
+importante para os prestadores de serviços que são objeto dos reviews,
+bem como para a gestão pública do turismo. Saber o que o usuário pensa
+dos produtos e serviços turísticos é fundamental para perceber pontos
+fracos e fortes e, por conseguinte, oferecem pistas que possibilitam a
+condução de eventuais estratégias de readequação desses produtos e
+serviços.
+
+Face o exposto, o presente estudo tem como objetivo analisar os reviews
+referentes aos 6 atrativos turísticos mais destacados pelo TripAdvisor.
+Mais especificamente, o que se busca com a análise desses reviews é i)
+realizar a análise descritiva dos atrativos analisados, ii) realizar uma
+análise de sentimentos dos reviews e iii) realizar a modelagem de
+tópicos.
+
+# Metodologia
+
+\
+
+## Seleção dos atrativos
+
+Os atrativos foram selecionados através do site do TripAdvisor
+utilizando "Recife" como termo de busca. Em seguida, foi selecionada a
+opção "O que fazer". A [página com os
+resultados](https://www.tripadvisor.com.br/Attractions-g304560-Activities-a_allAttractions.true-Recife_State_of_Pernambuco.html)
+retornou 384 lugares. Para ordenar a exibição desses locais, escolheu-se
+a opção "Favoritos dos viajantes". Segundo o TripAdvisor nessa ordem de
+exibição as atrações são classificadas usando dados do Tripadvisor,
+incluindo avaliações, pontuações, fotos e popularidade. Como resultado
+desses critérios de busca, os principais atrativos foram:
+
+1.  Instituto Ricardo Brennand, com mais de 9.000 reviews;
+2.  Praça do Marco Zero, com mais de 6.000 reviews;
+3.  RioMar Recife Mall, com mais de 4.000 reviews;
+4.  Oficina Cerâmica Francisco Brennand, com mais de 2.000 reviews;
+5.  Museu Cais do Sertão, com mais de 1.600 reviews;
+6.  Recife Antigo, com mais de 6.800 reviews;
+7.  Praia de Boa Viagem, com mais de 7.000 reviews.
+
+Face o resultado obtido, optou-se por excluir o RioMar Recife Mall por
+se tratar de um shopping center. Desta forma, considerou-se o atrativo
+nº 7 para completar a lista dos seis atrativos avaliados.
+
+## Obtenção dos dados
+
+Os reviews foram obtidos a partir de *webscraping*. De acordo com o
+Dicionário de Cambdrige, *webscraping* é a atividade de pegar
+informações de um site ou tela de computador e colocá-las em um
+documento ordenado em um computador. Há diversas possibilidades para se
+realizar *webscraping*. No presente estudo, utilizou-se uma extensão do
+Google Chrome denominada [Web
+Scraper](https://chrome.google.com/webstore/detail/web-scraper-free-web-scra/jnhgnonknehpejjnehehllkliplmbmhn).
+Após configurar o webscraper, procedeu-se à captura de todos *reviews* de
+cada um dos 6 atrativos turísticos (Quadro_\@ref(tab:nReviewsAnalisados)).
+
+```{r nReviewsAnalisados, tab.id = "nReviewsAnalisados", tab.cap = "Número de reviews analisados", include=TRUE, echo=FALSE}
+
+tripadvisor_review %>% 
+  tabyl(atrativo) %>% 
+  arrange(desc(n)) %>% 
+  adorn_pct_formatting() %>% 
+  adorn_totals(where = "row") %>% 
+  setNames(c("Atrativo",
+             "n",
+             "Percentagem")) %>% 
+  as_tibble() %>% 
+  kable()
+```
+
+## Tratamento e processamento dos dados
+
+O resultado do *webscraping* foi uma planilha com os dados coletados.
+Essa planilha foi importada para o software estatístico *R* no qual os dados foram tratados e processados. Para o tratamento dos dados (que envolve a limpeza e preparação dos mesmos para o processamento) foi utilizado o pacote *tidyverse*. Para o processamento de texto com a finalidade de realizar análise de sentimentos foi utilizado o pacote *tidytext* e para a modelagem de tópicos o pacote *topicmodels*.
+
+\
+
+# Mineração de texto
+
+Textos, por sua vez, constituem dados não estruturados que, para serem convertidos em conhecimento devem ser transformados para um formato estruturado. Em sua essência, a mineração de texto - *text mining*, entendida enquanto uma extensão da área de mineração de dados - *data mining* [@barion2008mineraccao], trata de analisar grandes quantidades de textos não estruturados e extrair *insights* úteis e inovadores passíveis de influenciar o processo de tomada de decisões [@kwartler2017text].
+
+Em mineração de texto *corpus* refere-se a uma coleção de documentos. Um **documento**, por seu turno, é um registro de texto (nos termos do presente estudo, um *review*, por exemplo, é um documento) composto por um conjunto de **termos** ou **palavras** [@blei2003latent].
+
+Conforme @kwartler2017text, há dois tipos de mineração de texto: um chamado "saco de palavras" (*bag of words*) e outro "análise sintática" (*syntactic parsing*), cada uma com seus benefícios e deficiências. O presente estudo adota o método de "saco de palavras" por ser mais simples de realizar/analisar e por exigir menor esforço computacional.
+
+O *R* oferece alguns pacotes dedicados à mineração de texto. Entre os mais conhecidos estão o *tm* e o *tidytext* (utilizado neste estudo).
+
+No pacote *tidytext* a abordagem *bag of words* se dá por meio da decomposição de cada documento em "termos" através de um processo denominado tokenização (*tokenization*). Desta forma, o "documento" (que no caso em tela é um *review*) é decomposto em várias linhas, onde cada linha é um "termo" - *token*. No processo de tokenização palavras são convertidas para minúsculo (*lowercase*) e os espaços em branco e pontuações são retirados. A título de exemplo, o  Quadro\@ref(tab:exemploTokenization) 
+apresenta o que seria a *tokenização* para o seguinte *review*:
+
+
+"Basta seguir as orientações das placas que tudo fica bem. Quiosques com preços compatíveis e bom atendimento".
+
+```{r tab.id = "exemploTokenization", tab.cap = "Exemplo de tokenização para um review",  include=TRUE, echo=FALSE}
+
+tripadvisor_review[5,2] %>% 
+  unnest_tokens(input = review, output = token)
+
+```
+
+Uma vez que o texto tenha sido minerado, é possível utilizá-lo de diversas formas e para os mais variados propósitos. No presente estudo, o texto minerado a partir do material coletado no site do TripAdvisor foi utilizado para realizar **análise de sentimentos** e **modelagem de tópicos**.
+
+\
+
+## Análise de sentimento
+
+Conforme @kwartler2017text, análise de sentimento (*sentiment analysis*) é o processo de extrair o estado emocional de um autor. @kwartler2017text destaca ainda que há diversos *frameworks* que podem ser utilizados para este fim (Figura\@ref(fig:frameworkAnaliseSentimentos)).
+
+```{r, frameworkAnaliseSentimentos, fig.cap= "Frameworks para análise de sentimentos", fig.align='center',  include=TRUE, echo=FALSE}
+
+include_graphics("imagem/tecnicas_analise_sentimentos.jpg")
+
+```
+
+A abordagem empregada neste estudo foi a "*Lexicon-based*", mais precisamente a baseada em dicionários (*Dictionary-based Approach*), a abordagem mais simples e mais utilizada quando se trata de analisar sentimentos (@silge2017text).
+
+Nesta abordagem o documento é considerado enquanto uma combinação de seus termos individuais. Assim, a análise consiste em (@silge2017text):
+
+i) separar o documento em suas termos individuais (tokenização);
+ii) retirar as *stopwords* (palavras vazias de sentido); 
+iii) vincular as palavras que sobraram a um dicionário de léxicos;
+iv) identificar a polaridade de cada termo. Polaridades significa classificar um termo entre pólos negativo (sentimentos negativos) e positivo (sentimentos positivos).
+
+\
+
+A polaridade de um termo é baseada em um *lexicon* (uma lista de palavras associadas a um estado emocional particular). Por exemplo, as palavras "ruim", "horrível" e "terrível" podem ser razoavelmente associadas a um sentimento negativo; enquanto que "perfeito" ou "ideal" podem ser relacionados a um estado positivo (@kwartler2017text).
+
+Pacotes como *tidytext*, *qdap* e *tm* fornecem *lexicons* com milhares de termos classificados como positivos, neutros ou negativos. No entanto, todos eles são em inglês, o quê inviabiliza sua utilização para analisar reviews em português. Neste sentido, utilizou-se o pacote *lexiconPT*  que reúne um dicionário de palavras em português associadas a sentimentos positivos (registrados como 1), neutros (0) e negativos (-1). O 
+Quadro \@ref(tab:oplexicon) 
+apresenta os seis primeiros registros (de um total de 30.673 termos) com suas respectivas polaridades.
+
+```{r tab.id = "oplexicon", tab.cap = "Primeiros registros do lexiconPT e suas respectivas polaridades", include=TRUE, echo=FALSE}
+
+oplexicon_v2.1 %>% 
+  head() %>% 
+  setNames(c("Termo",
+             "Tipo",
+             "Polaridade"))
+
+```
+
+Uma vez verificadas as polaridades de cada termo, são calculados todos os termos positivos e todos os termos negativos de cada documento. Ao final, o **score do documento**, isto é, diferença entre o somatório das polaridades dos termos positivos e o somatório das polaridades termos negativos resultará em uma das seguintes possibilidades:
+
+- score do *review* < 0 (*review* classificado como negativo);
+- score do *review* = 0 (*review* classificado como neutro);
+- score do *review* > 0 (*review* classificado como positivo)
+
+Uma vez obtidas as classificações, é possível somar todas as classificações negativas, neutras e positivas de modo a obter um panorama sobre o sentimento dos usuários em relação ao atrativo.
+
+\
+
+## Modelagem de tópicos
+
+
+A modelagem de tópicos é uma ferramenta de mineração de texto frequentemente usada para descobrir estruturas semânticas (tópicos) ocultas em um corpo de texto. Desta forma, os "tópicos" gerados constituem agrupamentos de palavras semelhantes (*clusters*) dentro de documentos [@kwartler2017text]. Trata-se de uma estratégia útil para descobrir associações implícitas **entre os *reviews***.
+
+
+\
+
+# Resultados
+
+
+```{r}
+tripadvisor_origem <- 
+tripadvisor_raw %>% 
+  drop_na(origem) %>% 
+  select(origem)
+
+reviewers_percent <- 
+round((nrow(tripadvisor_origem)*100)/nrow(tripadvisor_review), digits = 2)
+
+```
+
+O TripAdvisor permite que os usuários que postam *reviews* identifiquem seus locais de origem. Do ponto de vista da análise de dados, este é um recurso interessante porque possibilita ter uma ideia sobre quais seriam os principais mercados que visitam os atrativos analisados. Há que se ressalvar, entretanto, que como não se trata de um campo de preenchimento obrigatório no momento de escrever o *review*, não é possível obter a origem de **todos** os usuários que escreveram comentários, mas somente daqueles que optaram por citá-la. No caso em tela, praticamente todos os usuários (`r reviewers_percent`%) optaram por identificar a cidade/estado de origem. O Quadro
+\@ref(tab:origemEstados) 
+apresenta os seis estados de origem dos usuários mais frequentes.
+
+
+```{r origemEstados, tab.id = "origemEstados", tab.cap = "Estados de origem dos usuários", include=TRUE, echo=FALSE}
+
+str_match(string = tripadvisor_raw$origem, 
+          pattern = "(.*)\\,\\s([A-Z]{2})") %>% 
+  as_tibble() %>% 
+  drop_na(V1) %>% 
+  tabyl(V3) %>% 
+  adorn_pct_formatting() %>% 
+  arrange(desc(n)) %>% 
+  head() %>% 
+  setNames(c("Estado",
+             "Nº de reviews",
+             "Porcentagem")) %>% 
+  as_tibble()
+
+```
+
+
+Conforme se pode observar, **Pernambuco**, **São Paulo** e **Rio de Janeiro** são os Estados mais relevantes em termos de número de *reviews*. Tendo isto em vista, contabilizou-se os números de *reviews* por cidade para identificar as três cidades (por Estado) com maior quantidade de *reviews* (Quadro 
+\@ref(tab:origemMunicipios) 
+).
+
+
+
+```{r origemMunicipios, tab.id = "origemMunicipios", tab.cap = "Três municípios (por Estado) com maior número de reviews", include=TRUE, echo=FALSE}
+
+municipios_origem <- 
+str_match(string = tripadvisor_raw$origem, 
+          pattern = "(.*)\\,\\s([A-Z]{2})") %>% 
+  as_tibble() %>% 
+  drop_na(V1) %>% 
+  select(-V1) %>% 
+  count(V3,V2) %>% 
+  filter(V3 %in% c("PE","SP","RJ")) %>% 
+  group_by(V3) %>% 
+  slice_max(order_by = n,
+            n = 3)
+
+municipios_origem %>% 
+  setNames(c("Estado",
+             "Cidade",
+             "Nº de reviews"))
+
+```
+
+
+Como seria de se esperar, as capitais de cada estado (Recife/PE, São Paulo/SP e Rio de Janeiro/RJ) são as cidades que mais apresentam *reviews*. Ao mesmo tempo, a diferença entre a quantidade de *reviews* postados por usuários residentes nas capitais é significativamente maior que a dos usuários residentes nas outras duas cidades (para qualquer um dos 3 estados). Diante disso (e considerando apenas os dados analisados neste estudo), entende-se que o mais interessante seria concentrar os esforços promocionais e de *branding* nas capitais.
+
+
+Concentrando a análise sobre o conteúdo das avaliações postadas, convém, primeiramente, verificar os termos mais recorrentes (
+Figura \@ref(fig:termosFrequentesGeral)
+).
+
+```{r stopwords, include=FALSE}
+
+my_stopwords <- c("é",
+                  "recife",
+                  "lugar",
+                  "boa",
+                  "viagem",
+                  "local",
+                  "luiz",
+                  "francisco",
+"pra",
+"dia",
+"ir",
+"tudo",
+"lá",
+"ser",
+"fica")
+
+
+pt_stopwords <- 
+tibble(word = c(stopwords::stopwords("portuguese"),
+                my_stopwords))
+```
+
+```{r tripadvisor_review_unnested}
+
+tripadvisor_review_unnested <- 
+tripadvisor_review %>% 
+  unnest_tokens(input = review, output = word) %>% 
+  anti_join(pt_stopwords) %>% 
+  left_join(tripadvisor_review, by = "review_id") %>% 
+  rename(atrativo = atrativo.x) %>% 
+  select(review_id, word, atrativo, review)
+
+```
+
+```{r temosFrequentesGeral, tab.id = "termosFrequentesGeral", fig.cap = "Os cinco termos mais frequentes para todos os atrativos", fig.align='center', include=TRUE, echo=FALSE}
+
+tripadvisor_review_unnested %>% 
+  group_by(atrativo, word) %>% 
+  summarise(n = n()) %>% 
+  ungroup() %>% 
+  top_n(n=5) %>% 
+  
+  mutate(word2 = fct_reorder(word, n)) %>% 
+  
+  ggplot()+
+  geom_col(aes(word2, n),
+           fill = "turquoise2",
+           show.legend = F)+
+  coord_flip()+
+  xlab(NULL)+
+  ylab(NULL)+
+  theme_bw()
+```
+
+Face aos atrativos aqui analisados, fica evidente que "praia" refere-se à Praia de Boa Viagem; "museu" pode se referir tanto ao Museu Cais do Sertão como o Instituto Ricardo Brennand; "armas" refere-se ao Instituto Ricardo Brennand; "antigo" ao Recife Antigo e "marco" ao Marco Zero. Ou seja, as cinco palavras mais frequentes fazem menção aos atrativos propriamente dito.
+
+Já a Figura \@ref(fig:termosFrequentesAtrativos) 
+apresenta os cinco termos mais recorrentes por atrativo.
+
+```{r}
+swr = function(string, nwrap=22) {
+   paste(strwrap(string, width=nwrap), collapse="\n")
+ }
+
+swr = Vectorize(swr)
+```
+
+
+```{r, tab.id = "termosFrequentesAtrativos", fig.cap = "Os cinco termos mais frequentes por atrativo", fig.align='center', echo = FALSE}
+
+tripadvisor_review_unnested %>% 
+  group_by(atrativo, word) %>% 
+  summarise(n = n()) %>% 
+  top_n(n=5) %>% 
+  ungroup() %>% 
+  
+  mutate(word2 = fct_reorder(word, n)) %>% 
+  mutate(atrativo_break = swr(atrativo)) %>% 
+  
+  ggplot()+
+  geom_col(aes(word2, n, fill = atrativo_break),
+           show.legend = F)+
+  coord_flip()+
+  xlab(NULL)+
+  ylab(NULL)+
+  facet_wrap(~atrativo_break, scales = "free_y")+
+  theme(strip.text = element_text())+
+  theme_bw()
+  
+
+```
+
+
+Conforme se pode verificar, o termo mais citado em todos os *reviews* é "praia". Provavelmente relacionado à "Praia de Boa Viagem" (e seus mais de 7.400 *reviews*). Não deixa de ser curioso notar que mesmo nos demais atrativos (que não estão localizados na praia), há a menção ao termo praia conforme frequência que se verifica no 
+Quadro \@ref(tab:frequenciaPraiaAtrativos) 
+
+
+```{r frequenciaPraiaAtrativos, tab.id = "frequenciaPraiaAtrativos", tab.cap = "Frequência do termo 'Praia' nos atrativos", include=TRUE, echo=FALSE}
+
+tripadvisor_review_unnested %>% 
+  filter(word == "praia") %>% 
+  tabyl(atrativo) %>%
+  adorn_pct_formatting() %>% 
+  arrange(desc(n)) %>% 
+  setNames(c("Atrativo",
+             "Nº de reviews",
+             "Percentual")) %>% 
+  as_tibble()
+```
+
+```{r, include=FALSE}
+
+tripadvisor_review_unnested_praia_instituto_brennand <- 
+tripadvisor_review_unnested %>% 
+  filter(word == "praia",
+         atrativo == "Instituto Ricardo Brennand - Recife")
+
+```
+
+Conforme se nota, depois da própria "Praia de Boa Viagem", os *reviews* que mais se referiram ao termo "praia" foram aqueles postados sobre o atrativo "Instituto Ricardo Brennand". Analisando os *reviews* associados a este atrativo, é possível notar que a menção à praia surge em contextos de:
+
+- **complementaridade**, como em:
+     - "Para quem quer unir cultura + história + tranquilidade, esta é uma ótima opção. Recife não é só praia, tem também lindo instituto em um castelo que faz você se sentir no passado. Bom para passear, bom para sentar e contemplar a paisagem." ou
+     - "O ideal é ficar uma tarde . Só funciona de segunda a sexta e nos finais de semana no domingo . Portanto faça uma praia de manha e uma tarde em Brennand."
+- **substitutibilidade**, como em:
+     - "... Tire um dos dias de passeio para ir lá. Não irá se arrepender de "perder" um dia de praia.",
+     - "... lugar otimo para passeio ,bonito tranquilo e cheio de atracções ,para quem quer da um tempo de praia e passar um dia na cidade é uma otima opção".
+
+Seja como for, aparentemente essa menção massiva à praia endossa o imaginário que tem o Recife como destino de sol e mar.
+
+
+## Análise de sentimentos
+
+Conforme exposto na secção de metodologia, uma abordagem *lexicon-based* (adotada neste estudo) para análise de sentimentos requer: separar o documento em suas termos individuais (tokenização); remover as *stopwords*; vincular as palavras que sobraram a um dicionário de léxicos e; identificar a polaridade de cada termo.
+
+Uma vez realizado esse procedimento, foi possível analisar os dados no que toca aos sentimentos.
+
+Primeiramente, verificou-se que os atrativos são majoritariamente avaliados de forma **positiva** 
+(Figura\_\@ref(fig:avaliacaoReviews)). A
+Figura\_\@ref(fig:avaliacaoReviewsAtrativos) 
+detalha as avaliações por
+atrativos através da qual se pode constatar que a quantidade de *reviews* **positivos** supera bastante a dos *reviews* negativos e neutros. Daí, infere-se que os 6 atrativos analisados no âmbito deste estudo têm agradado aos usuários.
+
+```{r polaridade_do_review, include=FALSE}
+
+analise_review <- 
+tripadvisor_review_unnested %>% 
+  inner_join(oplexicon_v3.0, by = c("word" = "term")) %>% 
+  mutate(sentiment = case_when(polarity <  0 ~ "negativo",
+                               polarity == 0 ~ "neutro",
+                               polarity >  0 ~ "positivo")) %>% 
+  group_by(review_id, sentiment, review) %>% 
+  count(sentiment) %>% 
+  ungroup() %>% 
+  filter(sentiment != "neutro") %>% 
+  pivot_wider(names_from = sentiment, values_from = n, values_fill = 0) %>% 
+  relocate(positivo, .before = negativo) %>% 
+  mutate(pontuacao_review = positivo - negativo) %>% 
+  mutate(sentiment_review = case_when(pontuacao_review <  0 ~ "Negativo",
+                                      pontuacao_review == 0 ~ "Neutro",
+                                      pontuacao_review >  0 ~ "Positivo")) %>% 
+  count(sentiment_review) %>% 
+  mutate(sentiment_review_fct = fct_reorder(sentiment_review, n))
+```
+
+```{r percentSentimentReview, include=FALSE}
+
+tripadvisor_review_unnested %>% 
+  inner_join(oplexicon_v3.0, by = c("word" = "term")) %>% 
+  mutate(sentiment = case_when(polarity <  0 ~ "negativo",
+                               polarity == 0 ~ "neutro",
+                               polarity >  0 ~ "positivo")) %>% 
+  group_by(review_id, sentiment, review) %>% 
+  count(sentiment) %>% 
+  ungroup() %>% 
+  filter(sentiment != "neutro") %>% 
+  pivot_wider(names_from = sentiment, values_from = n, values_fill = 0) %>% 
+  relocate(positivo, .before = negativo) %>% 
+  mutate(pontuacao_review = positivo - negativo) %>% 
+  mutate(sentiment_review = case_when(pontuacao_review <  0 ~ "Negativo",
+                                      pontuacao_review == 0 ~ "Neutro",
+                                      pontuacao_review >  0 ~ "Positivo")) %>% 
+  tabyl(sentiment_review) %>% 
+  adorn_pct_formatting()
+```
+
+
+```{r, avaliacaoReviews, fig.cap = "Avaliação dos reviews", fig.align='center', include=TRUE, echo=FALSE}
+
+analise_review %>% 
+  ggplot()+
+  geom_col(aes(sentiment_review_fct, n),
+           fill = "grey90")+
+  geom_label(aes(sentiment_review_fct, n, label = n, hjust = 1.1))+
+  coord_flip()+
+  xlab("Sentimento do review")+
+  ylab("Nº de reviews")+
+  theme_bw()
+
+```
+
+```{r polaridade_do_review_facet_atrativo, include=FALSE}
+
+analise_review_facet <- 
+tripadvisor_review_unnested %>% 
+  inner_join(oplexicon_v3.0, by = c("word" = "term")) %>% 
+  mutate(sentiment = case_when(polarity <  0 ~ "negativo",
+                               polarity == 0 ~ "neutro",
+                               polarity >  0 ~ "positivo")) %>% 
+  group_by(review_id, sentiment, review, atrativo) %>% 
+  count(sentiment) %>% 
+  ungroup() %>% 
+  filter(sentiment != "neutro") %>% 
+  pivot_wider(names_from = sentiment, values_from = n, values_fill = 0) %>% 
+  relocate(positivo, .before = negativo) %>% 
+  mutate(pontuacao_review = positivo - negativo) %>% 
+  mutate(sentiment_review = case_when(pontuacao_review <  0 ~ "Negativo",
+                                      pontuacao_review == 0 ~ "Neutro",
+                                      pontuacao_review >  0 ~ "Positivo")) %>% 
+  count(sentiment_review, atrativo) %>% 
+  mutate(sentiment_review_fct = fct_reorder(sentiment_review, n))
+
+```
+
+
+```{r, avaliacaoReviewsAtrativos, fig.cap = "Avaliação dos reviews", fig.align='center', include=TRUE, echo=FALSE}
+
+analise_review_facet %>% 
+mutate(atrativo_break = swr(atrativo)) %>% 
+    ggplot()+
+  geom_col(aes(sentiment_review_fct, n, fill = atrativo_break),
+           show.legend = F)+
+  coord_flip()+
+  facet_wrap(~ atrativo_break)+
+  xlab("Sentimento do review")+
+  ylab("Nº de reviews")+
+  theme_bw()
+```
+
+Mesmo com avaliações eminentemente positivas, do ponto de vista do planejamento é importante identificar o que tem sido mais enfatizado nos comentários. A 
+Figura\@ref(fig:principaisTermosReviewsPositivos) e a 
+Figura\@ref(fig:principaisTermosReviewsNegativos) 
+apresentam os 5 termos positivos e negativos (respectivamente) mais frequentes nos *reviews* analisados.
+
+```{r, principaisTermosReviewsPositivos, fig.cap = "Principais termos associados aos reviews positivos", fig.align='center', include=TRUE, echo=FALSE}
+
+tripadvisor_review_unnested %>% 
+  inner_join(oplexicon_v3.0, by = c("word" = "term")) %>% 
+  filter(polarity != 0,
+         word != "bom") %>% 
+  mutate(sentiment = ifelse(polarity ==1, 
+                            yes = "positivo",
+                            no = "negativo")) %>% 
+  filter(sentiment == "positivo") %>% 
+  group_by(atrativo, word) %>% 
+  summarise(n = n()) %>% 
+  top_n(n=5) %>% 
+  ungroup() %>% 
+  
+  mutate(word2 = fct_reorder(word, n)) %>% 
+  mutate(atrativo_break = swr(atrativo)) %>% 
+  
+  ggplot()+
+  geom_col(aes(word2, n, fill = atrativo_break),
+           show.legend = F)+
+  coord_flip()+
+  facet_wrap(~atrativo_break, scales = "free_y")+
+  xlab("Termo")+
+  ylab("Nº de reviews")+
+  theme_bw()
+
+
+```
+
+```{r, principaisTermosReviewsNegativos, fig.cap = "Principais termos associados aos reviews negativos", fig.align='center', include=TRUE, echo=FALSE}
+
+tripadvisor_review_unnested %>%
+  filter(!str_detect(word, "sertanejo")) %>% 
+  inner_join(oplexicon_v3.0, by = c("word" = "term")) %>% 
+  filter(polarity != 0) %>% 
+  mutate(sentiment = ifelse(polarity ==1, 
+                            yes = "positivo", 
+                            no = "negativo")) %>% 
+  filter(sentiment == "negativo") %>% 
+  group_by(atrativo, word) %>% 
+  summarise(n = n()) %>% 
+  top_n(n=5) %>% 
+  ungroup() %>% 
+  
+  mutate(word2 = fct_reorder(word, n)) %>% 
+  mutate(atrativo_break = swr(atrativo)) %>% 
+  
+  ggplot()+
+  geom_col(aes(word2, n, fill = atrativo_break),
+           show.legend = F)+
+  coord_flip()+
+  facet_wrap(~atrativo_break, scales = "free_y")+
+  xlab("Termo")+
+  ylab("Nº de reviews")+
+  theme_bw()
+
+
+```
+
+
+Verifica-se que adjetivos como "**lindo**", "**linda**" e "**bonito**" nos comentários **positivos**, 
+(Figura\@ref(fig:principaisTermosReviewsPositivos)) 
+dão a entender que os aspectos estéticos e paisagísticos dos atrativos são satisfatórios para os usuários. Da mesma forma, a recorrência de adjetivos como "**maravilhoso**", "**excelente**" e "**interessante**" permite entrever que a experiência na visitação dos atrativos foi agradável.
+
+Já os termos negativos mais frequentes 
+(Figura\@ref(fig:principaisTermosReviewsNegativos)) 
+não dizem muito. Embora seja possível detectar a recorrência de termos como "**longe**" e "**distante**", isso não implica, necessariamente, a prevalência de avaliações negativas, uma vez que estes termos (dependendo do que vem antes) podem ser usados para fazer uma afirmação considerada positiva, como por exemplo: "não é longe" ou "não é tão distante". Por outro lado, a presença do termo "**ambulantes**" entre os mais recorrentes nos comentários negativos permite entrever que a presença desses profissionais é algo que é avaliado negativamente pelos usuários.
+
+Conforme também se pode constatar nos gráficos acima, o termo "**conhecer**" é comum à maioria das principais palavras associadas aos *reviews* "**positivos**" , assim como "**pouco**" é comum à maioria das principais palavras associadas aos reviews **negativos**. Face esta constatação, realizou-se uma análise focalizada em verificar quais os principais termos recorrentes nos comentários que continham os termos "conhecer" e "pouco".
+
+Filtrando os *reviews* **positivos** que contém o termo "conhecer", verifica-se a recorrência de termos como: "lindo",
+"bonito" e "interessante"
+(Figura\@ref(fig:principaisTermosReviewsPositivosCONHECER)), o que dá a entender que estes aspectos estésticos são os principais elementos que levam o usuário a recomendar a **conhecer o atrativo**.
+
+Estas evidências permitem conjecturar algumas possibilidades de ações que poderiam ser tentadas pelas gestões desses atrativos, tais como:
+
+1. Utilizar os referidos termos ("lindo", "bonito" e "interessante") nas ações publicitárias desses equipamentos;
+2. Realizar pesquisas com os visitantes para levantar **se** de fato acharam o atrativo "lindo", "bonito" e/ou "interessante";
+3. Realizar pesquisas com os visitantes para identificar **quais elementos** do atrativos estão atrelados aos adjetivos "lindo", "bonito" e "interessante".
+
+
+Já quando se filtram os *reviews* **negativos** que contém o termo "pouco", verifica-se uma relação, principalmente, com termos como: "distante", "longe" e "afastado"
+(Figura\_\@ref(fig:principaisTermosReviewsNegativosPOUCO)).
+
+```{r, principaisTermosReviewsPositivosCONHECER, fig.cap = "Termos mais frequentes associados aos reviews positivos que contém o termo 'conhecer'", fig.align='center', include=TRUE, echo=FALSE}
+
+tripadvisor_review %>% 
+  filter(str_detect(review, "conhecer")) %>% 
+  unnest_tokens(input = review, output = word) %>% 
+  anti_join(pt_stopwords) %>% 
+  filter(!word %in% c("conhecer")) %>% 
+  
+  inner_join(oplexicon_v3.0, by = c("word" = "term")) %>% 
+  filter(polarity != 0) %>% 
+  mutate(sentiment = ifelse(polarity ==1, 
+                            yes = "positivo", 
+                            no = "negativo")) %>% 
+  filter(sentiment == "positivo") %>% 
+  
+  count(word) %>% 
+  top_n(n=5) %>% 
+  
+  mutate(word2 = fct_reorder(word, n)) %>% 
+  
+  ggplot()+
+  geom_col(aes(word2, n),
+           fill = "skyblue3",
+           show.legend = F)+
+  coord_flip()+
+  xlab("Termo")+
+  ylab("Nº de reviews")+
+  theme_bw()
+
+```
+
+```{r, principaisTermosReviewsNegativosPOUCO, fig.cap = "Termos mais frequentes associados aos reviews negativos que contém o termo 'pouco'", fig.align='center', include=TRUE, echo=FALSE}
+
+
+tripadvisor_review %>% 
+  filter(str_detect(review, "pouco")) %>% 
+  unnest_tokens(input = review, output = word) %>% 
+  anti_join(pt_stopwords) %>% 
+  filter(!word %in% c("pouco")) %>% 
+  
+  inner_join(oplexicon_v3.0, by = c("word" = "term")) %>% 
+  filter(polarity != 0) %>% 
+  mutate(sentiment = ifelse(polarity ==1, 
+                            yes = "positivo", 
+                            no = "negativo")) %>% 
+  filter(sentiment == "negativo") %>% 
+  
+  count(word) %>% 
+  top_n(n=5) %>% 
+  
+  mutate(word2 = fct_reorder(word, n)) %>% 
+  
+  ggplot()+
+  geom_col(aes(word2, n),
+           fill = "tomato",
+           show.legend = F)+
+  coord_flip()+
+  xlab("Termo")+
+  ylab("Nº de reviews")+
+  theme_bw()
+
+```
+
+
+## Modelagem de tópicos
+
+**Modelagem de tópicos** (*topic modeling*) é tarefa de descobrir tópicos automaticamente a partir de uma grande quantidade de texto. Neste sentido, **tópico**, é entendido como uma coleção de palavras-chaves dominantes que são representantes típicos desse tópico. Ou seja, a modelagem de tópicos busca identificar os temas principais de discussão em grandes conjuntos de dados.
+
+A modelagem de tópicos é obtida através da aplicação de modelos de *machine learning* `[^1]`". Entre os algoritmos de *machine learning* mais utilizados para modelagem de tópicos (e que, por isso mesmo, será aquele empregado neste estudo) está o **Latent Dirichlet Allocation** (LDA)^[Há dois tipos de modelos de machine learning: o aprendizado supervisionado e o aprendizado não supervisionado (@kwartler2017text). No aprendizado supervisionado, o computador recebe um conjunto de dados rotulados que permite que ele aprenda como um humano faz uma tarefa. Esse é o modelo menos complexo, pois ele tenta replicar o aprendizado humano. Já no aprendizado não supervisionado, o computador recebe dados não rotulados e extrai padrões anteriormente desconhecidos deles. Para modelagem de tópicos, esta segunda abordagem é a mais indicada. Como a identificação das associações entre os termos não é induzido pelo pesquisador, trata-se de um modelo de aprendizado não supervisionado.]
+
+O LDA é um **modelo probabilístico generativo** de um corpus. A ideia básica é que os documentos são misturas aleatórias sobre tópicos latentes^[Em estatística, variáveis latentes (do latim: particípio presente de lateo (“mentir escondido”), ao contrário de variáveis observáveis), são variáveis que não são diretamente observadas, mas são bastante inferidas (através de um modelo matemático) de outras variáveis que são observadas (medidas diretamente).], onde cada tópico é uma mistura de um conjunto de palavras [@blei2003latent].
+
+O LDA então quebra o texto em palavras e cria uma Matriz Termo Documento (*Document Term Matrix* - DTM), onde cada linha representa um documento e cada coluna é composta por palavras (@kwartler2017text). Para cada palavra, o algoritmo calcula uma pontuação e aglutina aquelas com maior semelhança. O resultado é uma lista de palavras para cada tópico.
+
+
+
+```{r SPLIT, include=FALSE}
+
+tripadvisor_split <- 
+split(tripadvisor_review_unnested, tripadvisor_review_unnested$atrativo)
+
+```
+
+
+```{r, DTM, include=FALSE}
+
+dtm_tripadvisor_split <- 
+tripadvisor_split %>% 
+  map(~count(.x, word, review_id)) %>% 
+  map(~cast_dtm(.x, review_id, word, n)) %>% 
+  map(~as.matrix(.x))
+
+```
+
+
+```{r, include=FALSE}
+
+# # DTM Instituto Ricardo Brennand
+# dtm_ricardo_brennand <- 
+#   tripadvisor_split$`Instituto Ricardo Brennand - Recife` %>% 
+#   count(word, review_id) %>% 
+#   cast_dtm(review_id, word, n) %>% 
+#   as.matrix()
+# 
+# # DTM Museu Cais do Sertão
+# dtm_cais_sertao <- 
+#   tripadvisor_split$`Museu Cais do Sertão - Recife` %>% 
+#   count(word, review_id) %>% 
+#   cast_dtm(review_id, word, n) %>% 
+#   as.matrix()
+# 
+# # DTM Oficina Cerâmica Francisco Brennand
+# dtm_francisco_brennand <- 
+#   tripadvisor_split$`Oficina Cerâmica Francisco Brennand - Recife` %>% 
+#   count(word, review_id) %>% 
+#   cast_dtm(review_id, word, n) %>% 
+#   as.matrix()
+# 
+# # DTM Praça do Marco Zero
+# dtm_marco_zero <- 
+#   tripadvisor_split$`Praça do Marco Zero - Recife` %>% 
+#   count(word, review_id) %>% 
+#   cast_dtm(review_id, word, n) %>% 
+#   as.matrix()
+# 
+# # DTM Praia de Boa Viagem
+# dtm_boa_viagem <- 
+#   tripadvisor_split$`Praia de Boa Viagem - Recife` %>% 
+#   count(word, review_id) %>% 
+#   cast_dtm(review_id, word, n) %>% 
+#   as.matrix()
+# 
+# # DTM Recife Antigo
+# dtm_recife_antigo <- 
+#   tripadvisor_split$`Recife Antigo` %>% 
+#   count(word, review_id) %>% 
+#   cast_dtm(review_id, word, n) %>% 
+#   as.matrix()
+
+```
+
+```{r, LDA, include=FALSE}
+
+lda_tripadvisor_split <- 
+dtm_tripadvisor_split %>% 
+  map(~LDA(.x,
+           k = 3, 
+           method = "Gibbs"))
+
+```
+
+
+```{r, include=FALSE}
+
+# # LDA Instituto Ricardo Brennand
+# lda_out_ricardo_brennand <- 
+#   LDA(dtm_ricardo_brennand,
+#       k = 3, 
+#       method = "Gibbs")
+# 
+# # LDA Museu Cais do Sertão
+# lda_out_cais_sertao <- 
+#   LDA(dtm_cais_sertao,
+#       k = 3, 
+#       method = "Gibbs")
+# 
+# # LDA Oficina Cerâmica Francisco Brennand
+# lda_out_francisco_brennand <- 
+#   LDA(dtm_francisco_brennand,
+#       k = 3, 
+#       method = "Gibbs")
+# 
+# # LDA Praça do Marco Zero
+# lda_out_marco_zero <- 
+#   LDA(dtm_marco_zero,
+#       k = 3, 
+#       method = "Gibbs")
+# 
+# # LDA Praia de Boa Viagem
+# lda_out_boa_viagem <- 
+#   LDA(dtm_boa_viagem,
+#       k = 3, 
+#       method = "Gibbs")
+# 
+# # LDA Recife Antigo
+# lda_out_recife_antigo <- 
+#   LDA(dtm_recife_antigo,
+#       k = 3, 
+#       method = "Gibbs")
+
+```
+
+
+
+```{r, include=FALSE}
+lda_out_tripadvisor_split <- 
+lda_tripadvisor_split %>% 
+  map(~tidy(.x, matrix = "beta")) %>% 
+  map(~group_by(.x, topic))%>% 
+  map(~top_n(.x, 10, beta)) %>% 
+  map(~ungroup(.x)) %>% 
+  map(~mutate(.x, term2 = fct_reorder(term, beta)))
+```
+
+```{r GRAPH, include=FALSE}
+
+# GRAPH Ricardo Brennand
+graph_ricardo_brennand <- 
+lda_out_tripadvisor_split$`Instituto Ricardo Brennand - Recife` %>% 
+  
+  ggplot()+
+  geom_col(aes(term2, beta, fill = as.factor(topic)),
+           show.legend = F)+
+  coord_flip()+
+  ggtitle(label = "Instituto Ricardo Brennand")+
+  xlab(NULL)+
+  ylab(NULL)+
+  theme_bw()+
+  facet_wrap(~topic,
+             scales = "free_y")
+
+# GRAPH Museu Cais do Sertão
+graph_cais_sertao <- 
+lda_out_tripadvisor_split$`Museu Cais do Sertão - Recife` %>% 
+  
+  ggplot()+
+  geom_col(aes(term2, beta, fill = as.factor(topic)),
+           show.legend = F)+
+  coord_flip()+
+  ggtitle(label = "Museu Cais do Sertão")+
+  xlab(NULL)+
+  ylab(NULL)+
+  theme_bw()+
+  facet_wrap(~topic,
+             scales = "free_y")
+
+# GRAPH Oficina Cerâmica Francisco Brennand
+graph_francisco_brennand <- 
+lda_out_tripadvisor_split$`Oficina Cerâmica Francisco Brennand - Recife` %>% 
+  
+  ggplot()+
+  geom_col(aes(term2, beta, fill = as.factor(topic)),
+           show.legend = F)+
+  coord_flip()+
+  ggtitle(label = "Oficina Cerâmica Francisco Brennand")+
+  xlab(NULL)+
+  ylab(NULL)+
+  theme_bw()+
+  facet_wrap(~topic,
+             scales = "free_y")
+
+# GRAPH Praça do Marco Zero
+graph_marco_zero <- 
+lda_out_tripadvisor_split$`Praça do Marco Zero - Recife` %>% 
+  
+  ggplot()+
+  geom_col(aes(term2, beta, fill = as.factor(topic)),
+           show.legend = F)+
+  coord_flip()+
+  ggtitle(label = "Praça do Marco Zero")+
+  xlab(NULL)+
+  ylab(NULL)+
+  theme_bw()+
+  facet_wrap(~topic,
+             scales = "free_y")
+
+# GRAPH Praia de Boa Viagem
+graph_boa_viagem <- 
+lda_out_tripadvisor_split$`Praia de Boa Viagem - Recife` %>% 
+  ggplot()+
+  geom_col(aes(term2, beta, fill = as.factor(topic)),
+           show.legend = F)+
+  coord_flip()+
+  ggtitle(label = "Praia de Boa Viagem")+
+  xlab(NULL)+
+  ylab(NULL)+
+  theme_bw()+
+  facet_wrap(~topic,
+             scales = "free_y")
+
+# LDA Recife Antigo
+graph_recife_antigo <- 
+lda_out_tripadvisor_split$`Recife Antigo` %>% 
+  
+  ggplot()+
+  geom_col(aes(term2, beta, fill = as.factor(topic)),
+           show.legend = F)+
+  coord_flip()+
+  ggtitle(label = "Recife Antigo")+
+  xlab(NULL)+
+  ylab(NULL)+
+  theme_bw()+
+  facet_wrap(~topic,
+             scales = "free_y")
+```
+
+
+```{r MOSAICO, include=FALSE}
+
+mosaico_graph <- 
+graph_ricardo_brennand + 
+graph_cais_sertao + 
+graph_francisco_brennand + 
+graph_marco_zero +
+graph_boa_viagem + 
+graph_recife_antigo +
+  plot_layout(ncol = 1)
+
+```
+
+```{r GGSAVE, include=FALSE}
+
+ggsave(filename = "mosaico_graph.jpg", 
+       units = "cm",
+       height = 27,
+       width = 17.2)
+```
+
+
+No presente estudo, foram definidos 3 agrupamentos. A Figura\_\@ref(fig:mosaicoModelagemTopicos) 
+apresenta o resultado da modelagem de tópicos para todos os atrativos estudados.
+
+```{r mosaicoModelagemTopicos, fig.cap= "Modelagem de Tópicos para cada um dos atrativos analisados", fig.align='center', include=TRUE, echo=FALSE}
+
+include_graphics("mosaico_graph.jpg")
+
+```
+
+Para o **Instituto Ricardo Brennand** o Tópico 1 parece indicar aspectos gerais do atrativo. A probabilidade de ocorrência dos termos “pouco” e “tempo” leva a crer que os *reviews* consideram que a visita é insuficiente para conhecer todo o acervo do museu. O Tópico 2 parece indicar que o equipamento “vale a pena” ser visitado, e ressalta os elementos que justificam a recomendação, tais como: a “arte”, o “acervo” e as “obras”. Elementos estéticos (“lindo”) ou voltados para a experiência (tais como “passeio” e “história”) também parecem servir como justificativas para a recomendação da visitação. O Tópico 3, por sua vez, parece reunir os elementos que mais chamam a atenção nos visitantes: “armas”, “castelo”, “coleção”, “esculturas”, “obras” e “armaduras”.
+
+
+No caso do **Museu Cais do Sertão**, o Tópico 1 parece dar ênfase ao Nordeste e aos elementos da cultura nordestina, indicando que estes são os elementos mais emblemáticos citados nos *reviews*. Já o Tópico 2 parece indicar que a visita ao museu “vale a pena”. Há ainda dois elementos que parecem vir associados a essas recomendações: “interessante” e “interativo”, indicando que o caráter interativo do museu é algo bastante valorizado. O Tópico 3 parece evidenciar os elementos do museu mais notados pelos visitantes: Luiz “Gonzaga”, o “sertão” e o “sertanejo”, bem como a “história”. Parece ainda que particularmente os “instrumentos” musicais e a “música” chamaram bastante a atenção dos visitantes.
+
+
+Quanto à **Oficina Cerâmica Francisco Brennand**, o Tópico 1 parece fazer menção à estrutura do local, em particular aquilo que está no centro da visitação (a “Oficina”), bem como o "restaurante". O Tópico 2 parece remeter ao fato de que a visita ao equipamento é algo que “vale a pena” devido às “obras de arte”.  As justificativas para visita o atrativo também parecem estar associadas aos elementos paisagísticos do local (“passeio”, “lindo”). O Tópico 3 parece fazer referência aos elementos que mais chamam atenção dos visitantes, tais como: “esculturas”, “cerâmica”, as “peças” e a “oficina” de Brennand.
+
+
+Com relação à **Praça do Marco Zero**, o Tópico 1 parece indicar que a visitação ao atrativo “vale a pena” e elementos como a “história”, o “passeio” em si, as “fotos” parecem ser usados para justificá-la. O Tópico 2 parece agrupar os elementos do atrativo que mais chamam a atenção dos visitantes “bares” e “restaurantes” (localizados nos antigos armazéns que foram revitalizados), “artesanato” (provavelmente relacionado ao Centro de Artesanato de Pernambuco (localizado justamente na Praça do Marco Zero), a “vista”, e o “carnaval”. O Tópico 3 parece relacionar a Praça do Marco Zero com o entorno do bairro do Recife Antigo.
+
+
+```{r, include=FALSE}
+
+reviews_praia_boa_viagem <- 
+tripadvisor_review %>% 
+  filter(atrativo == "Praia de Boa Viagem - Recife")
+
+reviews_ataque_tubarao <- 
+tripadvisor_review %>% 
+  filter(str_detect(review, "tubarão|tubarões")) %>% 
+  filter(!str_detect(atrativo, "Zero|Antigo"))
+
+```
+
+Para a **Praia de Boa Viagem**, o Tópico 1 sugere que os comentários recomendam que o atrativo “vale a pena” ser visitado. Elementos como a “praia”, a “orla”, o “calçadão” e a “caminhada” pela orla parecem estar no âmago dessas recomendações. Aparentemente a limpeza da praia também é um aspecto que chama a atenção nos comentários. O Tópico 2 parece trazer alguns elementos típicos associados ao uso da praia, tais como “barracas” e “sol”. O Tópico 3, por sua vez, sugere que comentários relativos à Praia de Boa Viagem vêm, via de regra, associados aos “ataques” de “tubarão”. O alerta com relação a ataque de tubarões está presente em 
+`r nrow(reviews_ataque_tubarao)` dos 
+`r nrow(reviews_praia_boa_viagem)` *reviews* sobre a praia de Boa Viagem.
+
+Por fim, com relação ao **Recife Antigo**, o Tópico 1 parece estar associado à vida noturna (“noite”) e ao “carnaval”. O Tópico 2 parece vincular o Recife Antigo ao Marco Zero e ao Centro do Artesanato, e ressaltar a oferta gastronômica do bairro como “bares” e “restaurantes”. Já o Tópico 3 parece se referir ao fato de que “vale a pena” visitar o atrativo devido a elementos como sua “arquitetura”, os “prédios”, a “cultura”, além do “passeio” propriamente dito.
+
+Um termo que frequentemente aparece vinculado à avaliação dos atrativos é “**vale a pena**”. Tendo em vista que em um *review* esta expressão pode tanto remeter a algo positivo (“vale a pena”) como a algo negativo (“não vale a pena”), fez-se uma análise pormenorizada nos *reviews* que continham esse termo. O que se constatou foi que a grande maioria dos *reviews* que contêm o termo realmente o utilizam no sentido positivo (Quadro \@ref(tab:recomendacaoReviews)).
+
+
+```{r, include=FALSE}
+
+vale_pena <- 
+  tripadvisor_review %>% 
+  filter(str_detect(review, "(?<!não )vale a pena")) %>% 
+  mutate(recomendacao = "vale a pena")
+
+
+nao_vale_pena <- 
+tripadvisor_review %>% 
+  filter(str_detect(review, "(?<=não )vale a pena")) %>% 
+  mutate(recomendacao = "não vale a pena")
+
+```
+
+```{r recomendacaoReviews, tab.id = "recomendacaoReviews", tab.cap = "Frequência dos reviews com os termos 'vale a pena' e 'não vale a pena'", include=TRUE, echo=FALSE}
+
+bind_rows(vale_pena, nao_vale_pena) %>% 
+  tabyl(recomendacao) %>% 
+  adorn_pct_formatting() %>% 
+  arrange(desc(n)) %>% 
+  as_tibble()
+
+```
+
+
+Entre os termos que o empregam em um sentido negativo (“não vale a pena”), verificou-se que a maioria remete à Praia de Boa Viagem (Quadro \@ref(tab:recomendacaoNaoValePena)) e, via regra, buscam recomendar que não vale a pena entrar no mar devido ao risco de ataques de tubarão.
+
+
+```{r recomendacao Nao Vale a Pena, tab.id = "recomendacaoNaoValePena", tab.cap = "Frequência dos reviews com o termo 'não vale a pena'", include=TRUE, echo=FALSE}
+
+nao_vale_pena %>% 
+  tabyl(atrativo) %>% 
+  adorn_pct_formatting() %>% 
+  arrange(desc(n)) %>% 
+  as_tibble()
+
+```
+
+
+# Considerações Finais
+
+Conforme destacam @bissell2012mobile, @brown2007word, @hoffmann2017comportamento e @xiang2010role, as revisões online funcionam como um meio entre clientes e prestadores de serviços que pode não só refletir a satisfação com a experiência de consumo, mas também oferecer informações para ajudar os potenciais consumidores tomar decisões.
+
+Ao analisar `r nrow(tripadvisor_review)` *reviews* sobre os 6 atrativos mais comentados no TripAdvisor, o presente estudo encontrou que a quantidade de termos associados a sentimentos positivos é significativamente maior (79,9%) que termos associados a sentimentos negativos ou neutros. Tal resultado leva a crer que a maioria dos usuários gostou da experiência de visitar estes atrativos.
+
+Constatou-se ainda que os *reviews* positivos frequentemente utilizam termos que remetem a questões estéticas e empregam adjetivos que dão a entender que a experiência do visitante foi agradável.
+
+Analisando-se as relações latentes entre os termos extraídos dos *reviews*, foi possível identificar a ocorrência de 3 tópicos: um primeiro que aponta para uma recomendação de que "vale a pena" conhecer o atrativo; um segundo que se centra nas características gerais do atrativo e; um terceiro tópico que elenca os elementos mais emblemáticos dos atrativos, ou seja, aqueles que mais parecem ter chamado a atenção dos visitantes
+
+A análise do primeiro tópico corrobora o achado anterior de que os atrativos analisados mais agradam do que desagradam. Neste sentido, pode-se inferir que os atrativos do Recife estão no caminho certo. Ademais, considerando que os usuários parecem associar a recomendação em visitar o local à expressão “vale a pena”, levanta-se a possibilidade se não seria o caso de se pensar em “#valeapena” como uma *"hashtag"* a ser utilizada nas ações promocionais dos atrativos em redes sociais. Quanto ao segundo tópico, a obtenção de um panorama sobre a imagem que os usuários têm do atrativo pode ser útil para os gestores dos atrativos (re)posicionarem os mesmos no mercado. Já os elementos ressaltados no terceiro tópico podem servir como uma orientação para onde a gestão dos atrativos devem direcionar seus esforços de conservação/preservação. Também pode servir como um indicativo sobre o quê merece ser enfatizado (textualmente e visualmente) nos materiais publicitários.
+
+Convém ressaltar que o presente trabalho se constitui em um estudo exploratório. Neste sentido, análises em profundidade para coletar *reviews* de um único atrativo e analisá-los em minúcias são encorajados. Essas análises detalhadas tem potencial para trazer *insights* valorosos que podem auxiliar a gestão dos mesmos.
+
+A título de indicação para futuras pesquisa,  sugere-se analisar “se” e “de que forma” os atrativos têm empregado os termos identificados na Modelagem de Tópicos em suas ações promocionais. Outra possibilidade é ampliação deste estudo para considerar *reviews* de outros sites (Kayak, Booking, Airbnb, etc) ou mesmo de *tweets*. Desta forma poder-se-ia obter um panorama bem mais amplo e, ademais, segmentado por canal de comunicação.
+
+
+
+
+
+# Referências
+
